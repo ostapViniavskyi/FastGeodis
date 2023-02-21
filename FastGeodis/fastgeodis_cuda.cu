@@ -55,8 +55,8 @@ __global__ void euclidean_updown_single_row_pass_kernel(
         torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> distance_ptr,
         const int direction)
 {
-    const int height = image_ptr.size(2);
-    const int width = image_ptr.size(3);
+    const int height = distance_ptr.size(2);
+    const int width = distance_ptr.size(3);
 
     int kernelW = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -179,7 +179,7 @@ void euclidean_updown_pass_cuda(
             height,
             width);
 #else
-    AT_DISPATCH_FLOATING_TYPES(image.type(), "euclidean_updown_single_row_pass_kernel", ([&]
+    AT_DISPATCH_FLOATING_TYPES(distance.type(), "euclidean_updown_single_row_pass_kernel", ([&]
             { euclidean_updown_single_row_pass_kernel<scalar_t><<<blockCountUpDown, THREAD_COUNT>>>(
                 distance.packed_accessor32<scalar_t, 4, torch::RestrictPtrTraits>(),
                 direction);
@@ -196,7 +196,7 @@ void euclidean_updown_pass_cuda(
             height,
             width);
 #else
-    AT_DISPATCH_FLOATING_TYPES(image.type(), "euclidean_updown_single_row_pass_kernel", ([&]
+    AT_DISPATCH_FLOATING_TYPES(distance.type(), "euclidean_updown_single_row_pass_kernel", ([&]
             { euclidean_updown_single_row_pass_kernel<scalar_t><<<blockCountUpDown, THREAD_COUNT>>>(
                 distance.packed_accessor32<scalar_t, 4, torch::RestrictPtrTraits>(),
                 direction);
