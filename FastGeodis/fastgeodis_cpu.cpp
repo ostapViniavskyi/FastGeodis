@@ -70,7 +70,7 @@ void euclidean_updown_pass_cpu(
 #endif
         for (int w = 0; w < width; w++)
         {
-            float l_dist, cur_dist;
+            float cur_dist;
             float new_dist = distance_ptr[0][0][h][w];
 
             for (int w_i = 0; w_i < 3; w_i++)
@@ -96,7 +96,7 @@ void euclidean_updown_pass_cpu(
 #endif
         for (int w = 0; w < width; w++)
         {
-            float l_dist, cur_dist;
+            float cur_dist;
             float new_dist = distance_ptr[0][0][h][w];
 
             for (int w_i = 0; w_i < 3; w_i++)

@@ -67,7 +67,7 @@ torch::Tensor edt2d(const torch::Tensor &mask, const int &iterations)
     //         "function only supports 2D spatial inputs, received " + std::to_string(num_dims - 2));
     // }
 
-    if (image.is_cuda())
+    if (mask.is_cuda())
     {
 #ifdef WITH_CUDA
         if (!torch::cuda::is_available())

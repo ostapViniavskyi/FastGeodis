@@ -74,7 +74,7 @@ __global__ void euclidean_updown_single_row_pass_kernel(
                 continue;
             }
 
-            float l_dist, cur_dist;
+            float cur_dist;
             float new_dist = distance_ptr[0][0][h][kernelW];
 
             for (int w_i = 0; w_i < 3; w_i++)
@@ -83,7 +83,7 @@ __global__ void euclidean_updown_single_row_pass_kernel(
 
                 if (kernelW_ind >= 0 && kernelW_ind < width)
                 {
-                    cur_dist = distance_ptr[0][0][prevH][kernelW_ind] + l_eucl * local_dist2d[w_i];
+                    cur_dist = distance_ptr[0][0][prevH][kernelW_ind] + local_dist2d[w_i];
                     new_dist = std::min(new_dist, cur_dist);
                 }
             }
@@ -122,7 +122,7 @@ __global__ void euclidean_updown_single_row_pass_ptr_kernel(
                 // read outside bounds, skip
                 continue;
             }
-            float l_dist, cur_dist;
+            float cur_dist;
             float new_dist = distance_ptr[h * width + kernelW];
 
             for (int w_i = 0; w_i < 3; w_i++)
@@ -131,7 +131,7 @@ __global__ void euclidean_updown_single_row_pass_ptr_kernel(
 
                 if (kernelW_ind >= 0 && kernelW_ind < width)
                 {
-                    cur_dist = distance_ptr[(prevH) * width + kernelW_ind] + l_eucl * local_dist2d[w_i];
+                    cur_dist = distance_ptr[(prevH) * width + kernelW_ind] + local_dist2d[w_i];
                     new_dist = std::min(new_dist, cur_dist);
                 }
             }
@@ -150,7 +150,7 @@ __global__ void euclidean_updown_single_row_pass_ptr_kernel(
 }
 
 void euclidean_updown_pass_cuda(
-        torch::Tensor distance,
+        torch::Tensor distance
 )
 {
     // batch, channel, height, width
