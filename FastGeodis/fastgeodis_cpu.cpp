@@ -50,6 +50,104 @@ float l1distance(const float &in1, const float &in2)
 //     return std::sqrt(ret_sum);
 // }
 
+void euclidean_updown_pass_cpu(
+        torch::Tensor &distance
+)
+{
+    // batch, channel, height, width
+    const int height = distance.size(2);
+    const int width = distance.size(3);
+
+    auto distance_ptr = distance.accessor<float, 4>();
+    const float local_dist[] = {sqrt(float(2.)), float(1.), sqrt(float(2.))};
+
+    // top-down
+    for (int h = 1; h < height; h++)
+    {
+        // use openmp to parallelize the loop over width
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+        for (int w = 0; w < width; w++)
+        {
+            float l_dist, cur_dist;
+            float new_dist = distance_ptr[0][0][h][w];
+
+            for (int w_i = 0; w_i < 3; w_i++)
+            {
+                const int w_ind = w + w_i - 1;
+
+                if (w_ind < 0 || w_ind >= width)
+                    continue;
+
+                cur_dist = distance_ptr[0][0][h - 1][w_ind] + local_dist[w_i];
+                new_dist = std::min(new_dist, cur_dist);
+            }
+            distance_ptr[0][0][h][w] = new_dist;
+        }
+    }
+
+    // bottom-up
+    for (int h = height - 2; h >= 0; h--)
+    {
+        // use openmp to parallelize the loop over width
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+        for (int w = 0; w < width; w++)
+        {
+            float l_dist, cur_dist;
+            float new_dist = distance_ptr[0][0][h][w];
+
+            for (int w_i = 0; w_i < 3; w_i++)
+            {
+                const int w_ind = w + w_i - 1;
+
+                if (w_ind < 0 || w_ind >= width)
+                    continue;
+
+                cur_dist = distance_ptr[0][0][h + 1][w_ind] + local_dist[w_i];
+                new_dist = std::min(new_dist, cur_dist);
+            }
+            distance_ptr[0][0][h][w] = new_dist;
+        }
+    }
+}
+
+torch::Tensor edt2d_cpu(
+        const torch::Tensor &mask,
+        const int &iterations
+)
+{
+    const int height = mask.size(2);
+    const int width = mask.size(3);
+
+    const float dist_init_value = 2.0 * std::sqrt(height * height + width * width);
+    torch::Tensor distance = dist_init_value * mask.clone();
+
+    // iteratively run the distance transform
+    for (int itr = 0; itr < iterations; itr++)
+    {
+        distance = distance.contiguous();
+
+        // top-bottom - width*, height
+        euclidean_updown_pass_cpu(distance);
+
+        // left-right - height*, width
+        distance = distance.transpose(2, 3);
+        distance = distance.contiguous();
+
+        euclidean_updown_pass_cpu(distance);
+
+        // tranpose back to original - width, height
+        distance = distance.transpose(2, 3);
+
+        // * indicates the current direction of pass
+    }
+
+    return distance;
+}
+
 void geodesic_updown_pass_cpu(
     const torch::Tensor &image,
     torch::Tensor &distance,

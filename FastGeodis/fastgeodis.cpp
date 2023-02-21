@@ -41,6 +41,55 @@
 
 #define VERBOSE 0
 
+torch::Tensor edt2d(const torch::Tensor &mask, const int &iterations)
+{
+#if VERBOSE
+    #ifdef _OPENMP
+            std::cout << "Compiled with OpenMP support" << std::endl;
+        #else
+            std::cout << "Not compiled with OpenMP support" << std::endl;
+        #endif
+        #ifdef WITH_CUDA
+            std::cout << "Compiled with CUDA support" << std::endl;
+        #else
+            std::cout << "Not compiled with CUDA support" << std::endl;
+        #endif
+#endif
+
+    // check input dimensions
+    check_data_dim(mask, 4);
+    check_single_batch(mask);
+
+    // const int num_dims = mask.dim();
+    // if (num_dims != 4)
+    // {
+    //     throw std::invalid_argument(
+    //         "function only supports 2D spatial inputs, received " + std::to_string(num_dims - 2));
+    // }
+
+    if (image.is_cuda())
+    {
+#ifdef WITH_CUDA
+        if (!torch::cuda::is_available())
+        {
+            throw std::runtime_error(
+                "cuda.is_available() returned false, please check if the library was compiled successfully with CUDA support");
+        }
+        check_cuda(mask);
+
+        return edt2d_cuda(mask, iterations);
+
+#else
+        AT_ERROR("Not compiled with CUDA support.");
+#endif
+    }
+    else
+    {
+        check_cpu(mask);
+    }
+    return edt2d_cpu(mask, iterations);
+}
+
 torch::Tensor generalised_geodesic2d(const torch::Tensor &image, const torch::Tensor &mask, const float &v, const float &l_grad, const float &l_eucl, const int &iterations)
 {
     #if VERBOSE
@@ -114,6 +163,7 @@ torch::Tensor GSF2d(const torch::Tensor &image, const torch::Tensor &mask, const
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
+    m.def("edt2d", &edt2d, "Euclidean distance transform in 2d");
     m.def("generalised_geodesic2d", &generalised_geodesic2d, "Generalised Geodesic distance 2d");
     m.def("signed_generalised_geodesic2d", &signed_generalised_geodesic2d, "Signed Generalised Geodesic distance 2d");
     m.def("GSF2d", &GSF2d, "Geodesic Symmetric Filtering 2d");

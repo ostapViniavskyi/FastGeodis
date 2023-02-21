@@ -51,6 +51,194 @@ __device__ float l1distance_cuda(const float &in1, const float &in2)
 }
 
 template <typename scalar_t>
+__global__ void euclidean_updown_single_row_pass_kernel(
+        torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> distance_ptr,
+        const int direction)
+{
+    const int height = image_ptr.size(2);
+    const int width = image_ptr.size(3);
+
+    int kernelW = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int h = (direction == 1)? 1 : height - 2;
+
+    // if outside, then skip distance calculation - dont use the thread
+    if (kernelW < width)
+    {
+        while (h >= 0 && h < height)
+        {
+            int prevH = h - direction;
+            if (prevH < 0 || prevH >= height)
+            {
+                // read outside bounds, skip
+                continue;
+            }
+
+            float l_dist, cur_dist;
+            float new_dist = distance_ptr[0][0][h][kernelW];
+
+            for (int w_i = 0; w_i < 3; w_i++)
+            {
+                const int kernelW_ind = kernelW + w_i - 1;
+
+                if (kernelW_ind >= 0 && kernelW_ind < width)
+                {
+                    cur_dist = distance_ptr[0][0][prevH][kernelW_ind] + l_eucl * local_dist2d[w_i];
+                    new_dist = std::min(new_dist, cur_dist);
+                }
+            }
+            if (new_dist < distance_ptr[0][0][h][kernelW])
+            {
+                distance_ptr[0][0][h][kernelW] = new_dist;
+            }
+
+            // go to next row
+            h += direction;
+
+            // synchronise write for all threads
+            __syncthreads();
+        }
+    }
+}
+
+__global__ void euclidean_updown_single_row_pass_ptr_kernel(
+        float *distance_ptr,
+        const int direction,
+        const int height,
+        const int width)
+{
+    int kernelW = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int h = (direction == 1)? 1 : height - 2;
+
+    // if outside, then skip distance calculation - dont use the thread
+    if (kernelW < width)
+    {
+        while (h >= 0 && h < height)
+        {
+            int prevH = h - direction;
+            if (prevH < 0 || prevH >= height)
+            {
+                // read outside bounds, skip
+                continue;
+            }
+            float l_dist, cur_dist;
+            float new_dist = distance_ptr[h * width + kernelW];
+
+            for (int w_i = 0; w_i < 3; w_i++)
+            {
+                const int kernelW_ind = kernelW + w_i - 1;
+
+                if (kernelW_ind >= 0 && kernelW_ind < width)
+                {
+                    cur_dist = distance_ptr[(prevH) * width + kernelW_ind] + l_eucl * local_dist2d[w_i];
+                    new_dist = std::min(new_dist, cur_dist);
+                }
+            }
+            if (new_dist < distance_ptr[h * width + kernelW])
+            {
+                distance_ptr[h * width + kernelW] = new_dist;
+            }
+
+            // go to next row
+            h += direction;
+
+            // synchronise write for all threads
+            __syncthreads();
+        }
+    }
+}
+
+void euclidean_updown_pass_cuda(
+        torch::Tensor distance,
+)
+{
+    // batch, channel, height, width
+    const int height = distance.size(2);
+    const int width = distance.size(3);
+
+    // constexpr float local_dist[] = {sqrt(2.), 1., sqrt(2.)};
+    const float local_dist[] = {sqrt(float(2.)), float(1.), sqrt(float(2.))};
+
+    // copy local distances to GPU __constant__ memory
+    cudaMemcpyToSymbol(local_dist2d, local_dist, sizeof(float) * 3);
+
+    int blockCountUpDown = (width + 1) / THREAD_COUNT + 1;
+
+    // direction variable used to indicate read from previous (-1) or next (+1) row
+    int direction;
+
+    // top-down
+    direction = +1;
+    // each distance calculation in down pass require previous row i.e. +1
+    // process each row in parallel with CUDA kernel
+#if USE_PTR
+    euclidean_updown_single_row_pass_ptr_kernel<<<blockCountUpDown, THREAD_COUNT>>>(
+            distance.data_ptr<float>(),
+            direction,
+            height,
+            width);
+#else
+    AT_DISPATCH_FLOATING_TYPES(image.type(), "euclidean_updown_single_row_pass_kernel", ([&]
+            { euclidean_updown_single_row_pass_kernel<scalar_t><<<blockCountUpDown, THREAD_COUNT>>>(
+                distance.packed_accessor32<scalar_t, 4, torch::RestrictPtrTraits>(),
+                direction);
+            }));
+#endif
+
+
+    // bottom-up
+    direction = -1;
+#if USE_PTR
+    euclidean_updown_single_row_pass_ptr_kernel<<<blockCountUpDown, THREAD_COUNT>>>(
+            distance.data_ptr<float>(),
+            direction,
+            height,
+            width);
+#else
+    AT_DISPATCH_FLOATING_TYPES(image.type(), "euclidean_updown_single_row_pass_kernel", ([&]
+            { euclidean_updown_single_row_pass_kernel<scalar_t><<<blockCountUpDown, THREAD_COUNT>>>(
+                distance.packed_accessor32<scalar_t, 4, torch::RestrictPtrTraits>(),
+                direction);
+            }));
+#endif
+
+}
+
+torch::Tensor edt2d_cuda(
+        const torch::Tensor &mask,
+        const int &iterations
+)
+{
+    const int height = mask.size(2);
+    const int width = mask.size(3);
+
+    const float dist_init_value = 2.0 * std::sqrt(height * height + width * width);
+    torch::Tensor distance = dist_init_value * mask.clone();
+
+    // iteratively run the distance transform
+    for (int itr = 0; itr < iterations; itr++)
+    {
+        distance = distance.contiguous();
+
+        // top-bottom - width*, height
+        euclidean_updown_pass_cuda(distance);
+
+        // left-right - height*, width
+        distance = distance.transpose(2, 3);
+        distance = distance.contiguous();
+
+        euclidean_updown_pass_cuda(distance);
+
+        // tranpose back to original - width, height
+        distance = distance.transpose(2, 3);
+
+        // * indicates the current direction of pass
+    }
+    return distance;
+}
+
+template <typename scalar_t>
 __global__ void geodesic_updown_single_row_pass_kernel(
     torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> image_ptr,
     torch::PackedTensorAccessor32<scalar_t, 4, torch::RestrictPtrTraits> distance_ptr,
