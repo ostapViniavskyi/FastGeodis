@@ -148,6 +148,122 @@ torch::Tensor edt2d_cpu(
     return distance;
 }
 
+void euclidean_updown_pass_with_labels_cpu(
+        torch::Tensor &distance,
+        torch::Tensor &labels
+)
+{
+    // batch, channel, height, width
+    const int height = distance.size(2);
+    const int width = distance.size(3);
+
+    auto distance_ptr = distance.accessor<float, 4>();
+    auto labels_ptr = labels.accessor<int64_t, 4>();
+
+    const float local_dist[] = {sqrt(float(2.)), float(1.), sqrt(float(2.))};
+
+    // top-down
+    for (int h = 1; h < height; h++)
+    {
+        // use openmp to parallelize the loop over width
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+        for (int w = 0; w < width; w++)
+        {
+            float cur_dist;
+            float new_dist = distance_ptr[0][0][h][w];
+            int64_t new_label = labels_ptr[0][0][h][w];
+
+            for (int w_i = 0; w_i < 3; w_i++)
+            {
+                const int w_ind = w + w_i - 1;
+
+                if (w_ind < 0 || w_ind >= width)
+                    continue;
+
+                cur_dist = distance_ptr[0][0][h - 1][w_ind] + local_dist[w_i];
+                if (cur_dist < new_dist) {
+                    new_dist = cur_dist;
+                    new_label = labels_ptr[0][0][h - 1][w_ind];
+                }
+            }
+            distance_ptr[0][0][h][w] = new_dist;
+            labels_ptr[0][0][h][w] = new_label;
+        }
+    }
+
+    // bottom-up
+    for (int h = height - 2; h >= 0; h--)
+    {
+        // use openmp to parallelize the loop over width
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
+        for (int w = 0; w < width; w++)
+        {
+            float cur_dist;
+            float new_dist = distance_ptr[0][0][h][w];
+            int64_t new_label = labels_ptr[0][0][h][w];
+
+            for (int w_i = 0; w_i < 3; w_i++)
+            {
+                const int w_ind = w + w_i - 1;
+
+                if (w_ind < 0 || w_ind >= width)
+                    continue;
+
+                cur_dist = distance_ptr[0][0][h + 1][w_ind] + local_dist[w_i];
+                if (cur_dist < new_dist) {
+                    new_dist = cur_dist;
+                    new_label = labels_ptr[0][0][h + 1][w_ind];
+                }
+            }
+            distance_ptr[0][0][h][w] = new_dist;
+            labels_ptr[0][0][h][w] = new_label;
+        }
+    }
+}
+
+std::tuple<torch::Tensor, torch::Tensor> edt2d_with_labels_cpu(
+        const torch::Tensor &mask,
+        const int &iterations
+)
+{
+    const int height = mask.size(2);
+    const int width = mask.size(3);
+
+    const float dist_init_value = 2.0 * std::sqrt(height * height + width * width);
+    torch::Tensor distance = dist_init_value * mask.clone();
+    torch::Tensor labels = torch::arange(0, height * width).view({1, 1, height, width});
+
+    // iteratively run the distance transform
+    for (int itr = 0; itr < iterations; itr++)
+    {
+        distance = distance.contiguous();
+        labels = labels.contiguous();
+        // top-bottom - width*, height
+        euclidean_updown_pass_with_labels_cpu(distance, labels);
+
+        // left-right - height*, width
+        distance = distance.transpose(2, 3);
+        distance = distance.contiguous();
+
+        labels = labels.transpose(2, 3);
+        labels = labels.contiguous();
+
+        euclidean_updown_pass_with_labels_cpu(distance, labels);
+
+        // tranpose back to original - width, height
+        distance = distance.transpose(2, 3);
+        labels = labels.transpose(2, 3);
+
+        // * indicates the current direction of pass
+    }
+
+    return std::make_tuple(std::move(distance), std::move(labels));
+}
+
 void geodesic_updown_pass_cpu(
     const torch::Tensor &image,
     torch::Tensor &distance,

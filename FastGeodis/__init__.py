@@ -55,6 +55,31 @@ def edt2d(
         softmask, iter
     )
 
+def edt2d_with_labels(
+        softmask: torch.Tensor,
+        iter: int = 2
+):
+    r"""Computes Euclidean Distance using FastGeodis raster scanning.
+    For more details on generalised geodesic distance, check the following reference:
+
+    Criminisi, Antonio, Toby Sharp, and Andrew Blake.
+    "Geos: Geodesic image segmentation."
+    European Conference on Computer Vision, Berlin, Heidelberg, 2008.
+
+    The function expects input as torch.Tensor, which can be run on CPU or GPU depending on Tensor's device location
+
+    Args:
+        softmask: softmask in range [0, 1] with seed information.
+        iter: number of passes of the iterative distance transform method
+
+    Returns:
+        torch.Tensor with distance transform
+        torch.Tensor with labels of the closest 0-pixel
+    """
+    return FastGeodisCpp.edt2d_with_labels(
+        softmask, iter
+    )
+
 def generalised_geodesic2d(
     image: torch.Tensor, 
     softmask: torch.Tensor, 

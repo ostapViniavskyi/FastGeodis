@@ -39,6 +39,11 @@ torch::Tensor edt2d_cuda(
     const torch::Tensor &mask,
     const int &iterations);
 
+std::tuple<torch::Tensor, torch::Tensor>
+edt2d_with_labels_cuda(
+        const torch::Tensor &mask,
+        const int &iterations);
+
 torch::Tensor generalised_geodesic2d_cuda(
     const torch::Tensor &image,
     const torch::Tensor &mask,
@@ -51,6 +56,11 @@ torch::Tensor generalised_geodesic2d_cuda(
 torch::Tensor edt2d_cpu(
     const torch::Tensor &mask,
     const int &iterations);
+
+std::tuple<torch::Tensor, torch::Tensor>
+edt2d_with_labels_cpu(
+        const torch::Tensor &mask,
+        const int &iterations);
 
 torch::Tensor generalised_geodesic2d_cpu(
     const torch::Tensor &image,
